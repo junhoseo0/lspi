@@ -2,12 +2,11 @@ import sys
 import os.path
 import random
 from itertools import product
-from typing import Callable, Optional
+from typing import Callable
 
 import gymnasium as gym
 import numpy as np
 from scipy.spatial.distance import cdist
-from gymnasium.spaces.utils import flatten_space
 from gymnasium.wrappers.normalize import NormalizeObservation
 
 sys.modules["gym"] = gym
