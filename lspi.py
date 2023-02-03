@@ -26,7 +26,7 @@ def gaussian_radials(centers: np.ndarray, observations: np.ndarray) -> np.ndarra
     Returns
     -------
     radials: numpy.ndarray
-        a (m, )-shaped array
+        a (n, m)-shaped array
     """
 
     # dists is (n, m)-shaped array.
@@ -136,6 +136,10 @@ def main():
         env, buffer_size, lambda obs: model.predict(obs, deterministic=True)[0]
     )
     buffer = mix_buffers(buffer_size, buffer_random, buffer_dqn, random_tau)
+
+    # Delete the original buffers after mixing to save a memory.
+    del buffer_random
+    del buffer_dqn
 
     # Pre-compute all radials
     radials = gaussian_radials(
