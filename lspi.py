@@ -41,6 +41,7 @@ def rollout(
     obs_size = env.observation_space.shape[0]
     buffer = {
         "observations": np.zeros((buffer_size, obs_size)),
+        "next_observations": np.zeros((buffer_size, obs_size)),
         "actions": np.zeros((buffer_size,), dtype=np.int32),
         "rewards": np.zeros((buffer_size,)),
     }
@@ -55,6 +56,7 @@ def rollout(
 
             # Update the buffer
             buffer["observations"][t] = np.array(obs)
+            buffer["next_observations"][t] = np.array(next_obs)
             buffer["actions"][t] = np.array(action)
             buffer["rewards"][t] = np.array(reward)
 
@@ -86,9 +88,10 @@ def mix_buffers(
 def main():
     # Define arguments
     buffer_size = 10000
-    k = 3
+    k = 5
     gamma = 0.99
-    stop_criterion = 1.0
+    stop_criterion = 3.0
+    time_out = 100
 
     random_tau = 1.0
     env_name = "MountainCar-v0"
@@ -144,11 +147,17 @@ def main():
     radials = gaussian_radials(
         centers, buffer["observations"]
     )  # (buffer_size, feature_size)
+    next_radials = gaussian_radials(
+        centers, buffer["next_observations"]
+    )
     feature_size = radials.shape[1]
 
     radials_ext = np.tile(
         radials, reps=[1, num_actions]
     )  # (buffer_size, num_actions * feature_size)
+    next_radials_ext = np.tile(
+        next_radials, reps=[1, num_actions]
+    )
 
     # Pre-compute features for all observed observations and actions
     r = np.arange(num_actions * feature_size)
@@ -157,22 +166,23 @@ def main():
         (action_idxs[:, None] + 1) * feature_size > r
     )
 
-    features = np.zeros((buffer_size, num_actions, num_actions * feature_size))
-    features[:, feature_mask] = radials_ext  # (buffer_size, num_actions, feature_size)
-
-    features_observed = np.take_along_axis(
-        features, buffer["actions"][:, None, None], axis=1
+    features_all = np.zeros((buffer_size, num_actions, num_actions * feature_size))
+    features_all[:, feature_mask] = radials_ext  # (buffer_size, num_actions, feature_size)
+    features = np.take_along_axis(
+        features_all, buffer["actions"][:, None, None], axis=1
     )
+
+    features_all[:, feature_mask] = next_radials_ext # next_features
 
     # Pre-compute A and b for all transitions
     # Row-wise outer product; (buffer_size, num_actions, feature_size, feature_size)
     matA_all = np.matmul(
-        features_observed[:-1][:, :, :, None],
-        (features_observed[:-1] - gamma * features[1:])[:, :, None, :],
+        features[:, :, :, None],
+        (features - gamma * features_all)[:, :, None, :],
     )
 
     # NOTE: numpy.take_along_axis is slow operation, though necessary.
-    b = (buffer["rewards"][:, None, None] * features_observed).squeeze()
+    b = (buffer["rewards"][:, None, None] * features).squeeze()
     b = np.sum(b, axis=0)  # (feature_size,)
 
     # LSPI
@@ -180,9 +190,9 @@ def main():
     np_rng = np.random.default_rng()
     weight = np_rng.normal(size=(num_actions, feature_size))
     new_weight = np.array(weight)
-    while True:
+    for _ in range(time_out):
         # Choose greedy actions
-        values = np.dot(weight, radials[1:].T)
+        values = np.dot(weight, radials.T)
         actions = np.argmax(values, axis=0)
 
         # Update the weight
